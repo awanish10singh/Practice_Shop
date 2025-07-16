@@ -16,6 +16,7 @@
     "dependencies": {
         "bcryptjs": "^3.0.2",
         "body-parser": "^2.2.0",
+        "cloudinary": "^1.41.3",
         "compression": "^1.8.0",
         "connect-flash": "^0.1.1",
         "connect-mongodb-session": "^5.0.0",
@@ -29,6 +30,7 @@
         "mongoose": "^8.16.2",
         "morgan": "^1.10.0",
         "multer": "^2.0.1",
+        "multer-storage-cloudinary": "^4.0.0",
         "nodemailer": "^7.0.5",
         "pdfkit": "^0.17.1",
         "stripe": "^18.3.0"

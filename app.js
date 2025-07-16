@@ -16,6 +16,11 @@ const helmet = require("helmet");
 const compression = require("compression");
 // const morgan = require("morgan");
 
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+
+cloudinary.config(); // Automatically reads from process.env.CLOUDINARY_URL
+
 const errorController = require("./controllers/error");
 const User = require("./models/user");
 
@@ -27,13 +32,21 @@ const store = new MongoDBStore({
 });
 // const csrfProtection = csrf();
 
-const fileStorage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, "images");
-    },
-    filename: (req, file, cb) => {
-        const timestamp = new Date().toISOString().replace(/:/g, "-");
-        cb(null, timestamp + "-" + file.originalname);
+// const fileStorage = multer.diskStorage({
+//     destination: (req, file, cb) => {
+//         cb(null, "images");
+//     },
+//     filename: (req, file, cb) => {
+//         const timestamp = new Date().toISOString().replace(/:/g, "-");
+//         cb(null, timestamp + "-" + file.originalname);
+//     },
+// });
+
+const cloudStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: "product-images", // Optional: organizes your uploads
+        allowed_formats: ["jpg", "jpeg", "png"],
     },
 });
 
@@ -76,6 +89,7 @@ app.use(
                 "https://js.stripe.com",
                 "https://api.stripe.com",
             ],
+            imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
         },
     })
 );
@@ -89,11 +103,13 @@ app.use(compression());
 // app.use(morgan("combined", { stream: accessLogStream }));
 
 app.use(bodyParser.urlencoded({ extended: false }));
+// app.use(multer({ storage: fileStorage, fileFilter: fileFilter }).single("image"));
 app.use(
-    multer({ storage: fileStorage, fileFilter: fileFilter }).single("image")
+    multer({ storage: cloudStorage, fileFilter: fileFilter }).single("image")
 );
+
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/images", express.static(path.join(__dirname, "images")));
+// app.use("/images", express.static(path.join(__dirname, "images")));  //no longer serving images from disk
 
 app.use(
     session({
@@ -133,13 +149,15 @@ app.use("/admin", adminRoutes);
 app.use(shopRoutes);
 app.use(authRoutes);
 
-app.get("/500", errorController.get500);
+// app.get("/500", errorController.get500);
 
 app.use(errorController.get404);
 
 app.use((error, req, res, next) => {
     // res.status(error.httpStatusCode).render(...);
     // res.redirect('/500');
+
+    console.log(error);
     res.status(500).render("500", {
         pageTitle: "Error!",
         path: "/500",
