@@ -1,3 +1,13 @@
+document.addEventListener("DOMContentLoaded", () => {
+    const deleteButtons = document.querySelectorAll(".delete-btn");
+
+    deleteButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+            deleteProduct(btn); // use the same function you already have
+        });
+    });
+});
+
 const deleteProduct = (btn) => {
     const prodId = btn.parentNode.querySelector("[name=productId]").value;
     // const csrf = btn.parentNode.querySelector("[name=_csrf]").value;

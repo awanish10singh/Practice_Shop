@@ -2,7 +2,7 @@ const dotenv = require("dotenv");
 dotenv.config();
 
 const path = require("path");
-const fs = require("fs");
+// const fs = require("fs");
 const crypto = require("crypto");
 
 const express = require("express");
@@ -14,7 +14,7 @@ const flash = require("connect-flash");
 const multer = require("multer");
 const helmet = require("helmet");
 const compression = require("compression");
-const morgan = require("morgan");
+// const morgan = require("morgan");
 
 const errorController = require("./controllers/error");
 const User = require("./models/user");
