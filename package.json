@@ -4,13 +4,15 @@
     "description": "Complete Node.js Guide",
     "main": "app.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
         "start": "nodemon app.js",
-        "start-server": "node app.js"
+        "start-server": "node app.js",
+        "stripe:webhook": "stripe listen --forward-to localhost:3000/webhook",
+        "dev": "concurrently \"npm run start\" \"npm run stripe:webhook\""
     },
-    "author": "Maximilian Schwarzmüller",
+    "author": "Awanish Singh",
     "license": "ISC",
     "devDependencies": {
+        "concurrently": "^9.2.0",
         "nodemon": "^3.1.10"
     },
     "dependencies": {

@@ -6,8 +6,9 @@ const PDFDocument = require("pdfkit");
 
 const Product = require("../models/product");
 const Order = require("../models/order");
+const User = require("../models/user");
 
-const ITEMS_PER_PAGE = 2;
+const ITEMS_PER_PAGE = process.env.ITEMS_PER_PAGE;
 
 exports.getProducts = (req, res, next) => {
     const page = +req.query.page || 1;
@@ -171,6 +172,9 @@ exports.getCheckout = (req, res, next) => {
                 mode: "payment",
                 billing_address_collection: "required",
                 customer_email: req.user.email,
+                metadata: {
+                    userId: req.user._id.toString(), //  This is key
+                },
                 success_url: `${req.protocol}://${req.get(
                     "host"
                 )}/checkout/success`,
@@ -199,29 +203,80 @@ exports.getCheckout = (req, res, next) => {
         });
 };
 
+exports.stripeWebhookHandler = (req, res, next) => {
+    const sig = req.headers["stripe-signature"];
+
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(
+            req.body,
+            sig,
+            process.env.STRIPE_WEBHOOK_SECRET
+        );
+    } catch (err) {
+        console.error(
+            "⚠️  Webhook signature verification failed.",
+            err.message
+        );
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const userId = session.metadata.userId;
+        const address = session.customer_details?.address;
+        const email = session.customer_details?.email;
+
+        // Fetch user & convert cart to order
+        User.findById(userId)
+            .populate("cart.items.productId")
+            .then((user) => {
+                if (!user) throw new Error("User not found");
+
+                const products = user.cart.items.map((item) => ({
+                    product: { ...item.productId._doc },
+                    quantity: item.quantity,
+                }));
+
+                // console.log(products);
+
+                const order = new Order({
+                    user: {
+                        email: email,
+                        userId: userId,
+                        address: {
+                            line1: address.line1,
+                            line2: address.line2,
+                            city: address.city,
+                            state: address.state,
+                            postal_code: address.postal_code,
+                            country: address.country,
+                        },
+                    },
+                    products: products,
+                });
+
+                return order.save().then(() => {
+                    user.cart = { items: [] };
+                    return user.save();
+                });
+            })
+            .then(() => {
+                res.status(200).json({ received: true });
+            })
+            .catch((err) => {
+                console.error("❌ Webhook processing failed:", err);
+                res.status(500).json({ error: "Failed to create order" });
+            });
+    } else {
+        res.status(200).json({ received: true });
+    }
+};
+
 exports.getCheckoutSuccess = (req, res, next) => {
     req.user
-        .populate("cart.items.productId")
+        .clearCart()
 
-        .then((user) => {
-            const products = user.cart.items.map((i) => {
-                return {
-                    quantity: i.quantity,
-                    product: { ...i.productId._doc },
-                };
-            });
-            const order = new Order({
-                user: {
-                    email: req.user.email,
-                    userId: req.user,
-                },
-                products: products,
-            });
-            return order.save();
-        })
-        .then((result) => {
-            return req.user.clearCart();
-        })
         .then(() => {
             res.redirect("/orders");
         })
@@ -283,6 +338,7 @@ exports.getOrders = (req, res, next) => {
 
 exports.getInvoice = (req, res, next) => {
     const orderId = req.params.orderId;
+
     Order.findById(orderId)
         .then((order) => {
             if (!order) {
@@ -291,54 +347,92 @@ exports.getInvoice = (req, res, next) => {
             if (order.user.userId.toString() !== req.user._id.toString()) {
                 return next(new Error("Unauthorized"));
             }
-            const invoiceName = "invoice-" + orderId + ".pdf";
-            const invoicePath = path.join("data", "invoices", invoiceName);
 
-            const pdfDoc = new PDFDocument();
+            const invoiceName = `invoice-${orderId}.pdf`;
             res.setHeader("Content-Type", "application/pdf");
             res.setHeader(
                 "Content-Disposition",
-                'inline; filename="' + invoiceName + '"'
+                `inline; filename="${invoiceName}"`
             );
-            pdfDoc.pipe(fs.createWriteStream(invoicePath));
+
+            const pdfDoc = new PDFDocument({ margin: 50 });
             pdfDoc.pipe(res);
 
-            pdfDoc.fontSize(26).text("Invoice", {
-                underline: true,
-            });
-            pdfDoc.text("-----------------------");
-            let totalPrice = 0;
+            // Logo
+            const logoPath = path.join("public", "images", "shop-logo.png");
+            if (fs.existsSync(logoPath)) {
+                pdfDoc.image(logoPath, 50, 45, { width: 80 });
+            }
+            pdfDoc.fontSize(20).text("Practice Shop", 140, 50);
+            pdfDoc
+                .fontSize(10)
+                .text("123 MG Road, New Delhi, Delhi - 110001", 140, 70);
+            pdfDoc.text("Email: support@practiceshop.in", 140, 85);
+            pdfDoc.text("GSTIN: 07ABCDE1234F1Z5", 140, 100);
+            pdfDoc.moveDown(2);
+
+            // Invoice Meta
+            pdfDoc.fontSize(14).text(`Invoice #${orderId}`);
+            pdfDoc.text(`Date: ${new Date().toLocaleDateString("en-IN")}`);
+            pdfDoc.text(`Customer: ${req.user.email}`);
+            pdfDoc.moveDown();
+
+            // Table Header
+            pdfDoc.fontSize(12).font("Helvetica-Bold");
+            pdfDoc.text("Product ID", 50);
+            pdfDoc.text("Title", 150);
+            pdfDoc.text("Qty", 320);
+            pdfDoc.text("Price", 370);
+            pdfDoc.text("Total", 450);
+            pdfDoc.moveDown(0.3);
+            pdfDoc.font("Helvetica");
+
+            let subtotal = 0;
+
             order.products.forEach((prod) => {
-                totalPrice += prod.quantity * prod.product.price;
-                pdfDoc
-                    .fontSize(14)
-                    .text(
-                        prod.product.title +
-                            " - " +
-                            prod.quantity +
-                            " x " +
-                            "$" +
-                            prod.product.price
-                    );
+                const title = prod.product.title;
+                const id = prod.product._id.toString();
+                const qty = prod.quantity;
+                const price = prod.product.price;
+                const total = qty * price;
+                subtotal += total;
+
+                const y = pdfDoc.y;
+
+                pdfDoc.text(id, 50, y, { width: 90 });
+                pdfDoc.text(title, 150, y, { width: 150 });
+                pdfDoc.text(qty.toString(), 320, y);
+                pdfDoc.text(`₹${price.toFixed(2)}`, 370, y);
+                pdfDoc.text(`₹${total.toFixed(2)}`, 450, y);
+
+                const titleHeight = pdfDoc.heightOfString(title, {
+                    width: 150,
+                });
+                pdfDoc.moveDown(titleHeight / 14);
             });
-            pdfDoc.text("---");
-            pdfDoc.fontSize(20).text("Total Price: $" + totalPrice);
+
+            // Totals Section
+            const gstRate = 0.18;
+            const gst = subtotal * gstRate;
+            const grandTotal = subtotal + gst;
+
+            pdfDoc.moveDown(1);
+            pdfDoc.font("Helvetica-Bold");
+            pdfDoc.text(`Subtotal: ₹${subtotal.toFixed(2)}`, {
+                align: "right",
+            });
+            pdfDoc.text(`GST (18%): ₹${gst.toFixed(2)}`, { align: "right" });
+            pdfDoc.text(`Total: ₹${grandTotal.toFixed(2)}`, { align: "right" });
+
+            // Footer
+            pdfDoc.moveDown(2);
+            pdfDoc.fontSize(10).font("Helvetica");
+            pdfDoc.text("Thank you for shopping with us!", { align: "center" });
+            pdfDoc.text("This is a system-generated invoice.", {
+                align: "center",
+            });
 
             pdfDoc.end();
-            // fs.readFile(invoicePath, (err, data) => {
-            //   if (err) {
-            //     return next(err);
-            //   }
-            //   res.setHeader('Content-Type', 'application/pdf');
-            //   res.setHeader(
-            //     'Content-Disposition',
-            //     'inline; filename="' + invoiceName + '"'
-            //   );
-            //   res.send(data);
-            // });
-            // const file = fs.createReadStream(invoicePath);
-
-            // file.pipe(res);
         })
         .catch((err) => next(err));
 };
