@@ -7,4 +7,5 @@ data
 .DS_Store
 dist/
 build/
-util/
+
+util

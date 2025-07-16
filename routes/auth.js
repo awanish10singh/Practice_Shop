@@ -4,14 +4,17 @@ const { check, body } = require("express-validator");
 const authController = require("../controllers/auth");
 const User = require("../models/user");
 
+const redirectIfAuthenticated = require("../middleware/checkLoggedInUser");
+
 const router = express.Router();
 
-router.get("/login", authController.getLogin);
+router.get("/login", redirectIfAuthenticated, authController.getLogin);
 
-router.get("/signup", authController.getSignup);
+router.get("/signup", redirectIfAuthenticated, authController.getSignup);
 
 router.post(
     "/login",
+    redirectIfAuthenticated,
     [
         body("email")
             .isEmail()
@@ -27,6 +30,7 @@ router.post(
 
 router.post(
     "/signup",
+    redirectIfAuthenticated,
     [
         check("email")
             .isEmail()
